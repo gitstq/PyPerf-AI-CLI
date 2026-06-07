@@ -1,0 +1,300 @@
+"""
+Multi-Format Report Generation Module
+多格式报告生成模块 - JSON/Markdown/HTML/ASCII
+"""
+
+import json
+import os
+from typing import Optional, Any
+from datetime import datetime
+
+
+class PerfReporter:
+    """
+    性能分析报告生成器
+    支持多种输出格式
+    """
+
+    def __init__(self, theme: str = "dark"):
+        self.theme = theme
+
+    def generate_ascii_report(self, profile_result: Any, ai_result: Optional[Any] = None) -> str:
+        """生成ASCII终端报告"""
+        lines = []
+        lines.append("╔" + "═" * 78 + "╗")
+        lines.append("║" + " PyPerf-AI Performance Analysis Report ".center(78) + "║")
+        lines.append("╠" + "═" * 78 + "╣")
+        lines.append(f"║  🎯 Target: {profile_result.target[:60]:<60} ║")
+        lines.append(f"║  ⏱️  Total Time: {profile_result.summary['total_time_ms']:.2f} ms{'':<52} ║")
+        lines.append(f"║  📊 Functions: {profile_result.summary['user_functions']} user + {profile_result.summary['builtin_functions']} builtin{'':<42} ║")
+        lines.append("╠" + "═" * 78 + "╣")
+
+        if ai_result:
+            lines.append(f"║  🤖 AI Score: {ai_result.overall_score}/100  Grade: {ai_result.performance_grade}{'':<50} ║")
+            lines.append("╠" + "═" * 78 + "╣")
+
+        lines.append("║  🔥 Top Performance Hotspots" + " " * 49 + "║")
+        lines.append("╠" + "─" * 78 + "╣")
+
+        for h in profile_result.top_hotspots[:8]:
+            bar_len = int(h['time_percent'] / 2)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(f"║  #{h['rank']:<2} {h['function'][:25]:<25} {bar} {h['time_percent']:>5.1f}%  {h['cumulative_time_ms']:>8.2f}ms ║")
+
+        lines.append("╚" + "═" * 78 + "╝")
+
+        if ai_result and ai_result.suggestions:
+            lines.append("")
+            lines.append("╔" + "═" * 78 + "╗")
+            lines.append("║" + " 💡 AI Optimization Suggestions ".center(78) + "║")
+            lines.append("╠" + "═" * 78 + "╣")
+            for i, s in enumerate(ai_result.suggestions[:5], 1):
+                severity_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(s.severity, "⚪")
+                lines.append(f"║  {severity_emoji} [{s.severity.upper()}] {s.category.upper()}{'':<56} ║")
+                desc = s.description[:74]
+                lines.append(f"║     {desc:<74} ║")
+                if s.expected_improvement:
+                    lines.append(f"║     → {s.expected_improvement[:71]:<71} ║")
+                lines.append("║" + " " * 78 + "║")
+            lines.append("╚" + "═" * 78 + "╝")
+
+        return "\n".join(lines)
+
+    def generate_markdown_report(self, profile_result: Any, ai_result: Optional[Any] = None) -> str:
+        """生成Markdown格式报告"""
+        md = f"""# 🔥 PyPerf-AI Performance Analysis Report
+
+> **Target**: `{profile_result.target}`  
+> **Analysis Time**: {profile_result.timestamp}  
+> **Total Execution Time**: `{profile_result.summary['total_time_ms']:.2f} ms`
+
+---
+
+## 📊 Performance Summary
+
+| Metric | Value |
+|--------|-------|
+| Total Functions | {profile_result.summary['total_functions']} |
+| User Functions | {profile_result.summary['user_functions']} |
+| Built-in Functions | {profile_result.summary['builtin_functions']} |
+| Total Calls | {profile_result.summary['total_calls']:,} |
+| User Calls | {profile_result.summary['user_calls']:,} |
+| Avg Calls/Function | {profile_result.summary['avg_calls_per_function']} |
+
+---
+
+## 🔥 Top Hotspots
+
+| Rank | Function | Location | Calls | Time (ms) | % |
+|------|----------|----------|-------|-----------|---|
+"""
+        for h in profile_result.top_hotspots[:10]:
+            md += f"| {h['rank']} | `{h['function']}` | `{h['location']}` | {h['calls']:,} | {h['cumulative_time_ms']:.2f} | {h['time_percent']:.1f}% |\n"
+
+        if ai_result:
+            md += f"""
+---
+
+## 🤖 AI Analysis
+
+**Overall Score**: {ai_result.overall_score}/100  
+**Performance Grade**: {ai_result.performance_grade}
+
+### Bottleneck Analysis
+{ai_result.bottleneck_analysis}
+
+### Complexity Assessment
+{ai_result.complexity_assessment}
+
+### Memory Insights
+{ai_result.memory_insights}
+
+---
+
+## 💡 Optimization Suggestions
+
+"""
+            for i, s in enumerate(ai_result.suggestions, 1):
+                severity_badge = {"critical": "🔴 CRITICAL", "high": "🟠 HIGH", "medium": "🟡 MEDIUM", "low": "🟢 LOW"}.get(s.severity, "⚪")
+                md += f"""### {i}. {severity_badge} - {s.category.upper()}
+
+**Description**: {s.description}
+
+"""
+                if s.original_code:
+                    md += f"**Original**:\n```python\n{s.original_code}\n```\n\n"
+                if s.optimized_code:
+                    md += f"**Optimized**:\n```python\n{s.optimized_code}\n```\n\n"
+                md += f"**Expected Improvement**: {s.expected_improvement}\n\n"
+                if s.line_reference:
+                    md += f"**Reference**: `{s.line_reference}`\n\n"
+                md += "---\n\n"
+
+        md += f"""
+---
+
+*Generated by PyPerf-AI-CLI v1.0.0*  
+*Report Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*
+"""
+        return md
+
+    def generate_html_report(self, profile_result: Any, ai_result: Optional[Any] = None) -> str:
+        """生成HTML格式报告"""
+        hotspots_rows = ""
+        for h in profile_result.top_hotspots[:10]:
+            width = min(h['time_percent'], 100)
+            hotspots_rows += f"""
+            <tr>
+                <td>{h['rank']}</td>
+                <td><code>{h['function']}</code></td>
+                <td><code>{h['location']}</code></td>
+                <td>{h['calls']:,}</td>
+                <td>{h['cumulative_time_ms']:.2f} ms</td>
+                <td>
+                    <div class="bar-container">
+                        <div class="bar" style="width: {width}%"></div>
+                        <span>{h['time_percent']:.1f}%</span>
+                    </div>
+                </td>
+            </tr>"""
+
+        suggestions_html = ""
+        if ai_result:
+            for s in ai_result.suggestions:
+                severity_class = s.severity
+                suggestions_html += f"""
+                <div class="suggestion {severity_class}">
+                    <h4>[{s.severity.upper()}] {s.category.upper()}</h4>
+                    <p>{s.description}</p>
+                    {f'<pre><code>{s.original_code}</code></pre>' if s.original_code else ''}
+                    {f'<pre class="optimized"><code>{s.optimized_code}</code></pre>' if s.optimized_code else ''}
+                    <p><strong>Expected:</strong> {s.expected_improvement}</p>
+                </div>"""
+
+        score_color = "#4caf50" if ai_result and ai_result.overall_score >= 80 else "#ff9800" if ai_result and ai_result.overall_score >= 60 else "#f44336"
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyPerf-AI Report</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; line-height: 1.6; padding: 20px; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .header {{ text-align: center; padding: 40px 0; border-bottom: 1px solid #30363d; margin-bottom: 30px; }}
+        .header h1 {{ color: #58a6ff; font-size: 2.5em; margin-bottom: 10px; }}
+        .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }}
+        .summary-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; text-align: center; }}
+        .summary-card .value {{ font-size: 2em; font-weight: bold; color: #58a6ff; }}
+        .summary-card .label {{ color: #8b949e; margin-top: 5px; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #30363d; }}
+        th {{ background: #161b22; color: #58a6ff; }}
+        tr:hover {{ background: #161b22; }}
+        .bar-container {{ display: flex; align-items: center; gap: 8px; }}
+        .bar {{ height: 20px; background: linear-gradient(90deg, #58a6ff, #238636); border-radius: 3px; transition: width 0.3s; }}
+        .suggestion {{ border-left: 4px solid; padding: 15px; margin: 15px 0; background: #161b22; border-radius: 0 8px 8px 0; }}
+        .suggestion.critical {{ border-color: #f85149; }}
+        .suggestion.high {{ border-color: #ffa657; }}
+        .suggestion.medium {{ border-color: #d29922; }}
+        .suggestion.low {{ border-color: #3fb950; }}
+        pre {{ background: #0d1117; padding: 15px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }}
+        pre.optimized {{ border: 1px solid #238636; }}
+        code {{ font-family: 'SF Mono', Monaco, monospace; font-size: 0.9em; }}
+        .score-circle {{ width: 120px; height: 120px; border-radius: 50%; border: 8px solid {score_color}; display: flex; align-items: center; justify-content: center; margin: 20px auto; }}
+        .score-value {{ font-size: 2.5em; font-weight: bold; color: {score_color}; }}
+        .section {{ margin: 30px 0; }}
+        .section h2 {{ color: #58a6ff; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #30363d; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 PyPerf-AI</h1>
+            <p>Performance Analysis Report for <code>{profile_result.target}</code></p>
+            <p style="color: #8b949e;">{profile_result.timestamp}</p>
+        </div>
+
+        <div class="summary">
+            <div class="summary-card">
+                <div class="value">{profile_result.summary['total_time_ms']:.1f}</div>
+                <div class="label">ms Total Time</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{profile_result.summary['user_functions']}</div>
+                <div class="label">User Functions</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{profile_result.summary['total_calls']:,}</div>
+                <div class="label">Total Calls</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{profile_result.summary['avg_calls_per_function']}</div>
+                <div class="label">Avg Calls/Func</div>
+            </div>
+        </div>
+
+        {"<div class='score-circle'><div class='score-value'>" + str(ai_result.overall_score) + "</div></div>" if ai_result else ""}
+
+        <div class="section">
+            <h2>🔥 Top Hotspots</h2>
+            <table>
+                <tr><th>Rank</th><th>Function</th><th>Location</th><th>Calls</th><th>Time</th><th>%</th></tr>
+                {hotspots_rows}
+            </table>
+        </div>
+
+        {f'<div class="section"><h2>🤖 AI Analysis</h2><p>{ai_result.bottleneck_analysis}</p></div>' if ai_result else ''}
+        {f'<div class="section"><h2>💡 Suggestions</h2>{suggestions_html}</div>' if ai_result and ai_result.suggestions else ''}
+
+        <div style="text-align: center; color: #8b949e; margin-top: 40px; padding-top: 20px; border-top: 1px solid #30363d;">
+            <p>Generated by PyPerf-AI-CLI v1.0.0</p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    def save_report(self, profile_result: Any, ai_result: Optional[Any], filepath: str, fmt: str = "auto"):
+        """保存报告到文件"""
+        if fmt == "auto":
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext == ".md":
+                fmt = "markdown"
+            elif ext == ".html":
+                fmt = "html"
+            elif ext == ".json":
+                fmt = "json"
+            else:
+                fmt = "markdown"
+
+        if fmt == "markdown":
+            content = self.generate_markdown_report(profile_result, ai_result)
+        elif fmt == "html":
+            content = self.generate_html_report(profile_result, ai_result)
+        elif fmt == "json":
+            data = {
+                "profile": {
+                    "target": profile_result.target,
+                    "total_time_ms": profile_result.summary['total_time_ms'],
+                    "timestamp": profile_result.timestamp,
+                    "summary": profile_result.summary,
+                    "hotspots": profile_result.top_hotspots
+                },
+                "ai_analysis": {
+                    "score": ai_result.overall_score if ai_result else None,
+                    "grade": ai_result.performance_grade if ai_result else None,
+                    "bottleneck": ai_result.bottleneck_analysis if ai_result else None,
+                    "suggestions": [
+                        {"category": s.category, "severity": s.severity, "description": s.description}
+                        for s in (ai_result.suggestions if ai_result else [])
+                    ]
+                } if ai_result else None
+            }
+            content = json.dumps(data, indent=2, ensure_ascii=False)
+        else:
+            raise ValueError(f"Unsupported format: {fmt}")
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)

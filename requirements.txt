@@ -1,0 +1,9 @@
+# PyPerf-AI-CLI Requirements
+# Zero dependencies - Pure Python Standard Library Only
+# 零依赖 - 仅使用Python标准库
+
+# Optional: For enhanced AI analysis with specific LLM providers
+# 可选：用于特定LLM提供商增强AI分析
+# zhipuai>=2.0.0
+# openai>=1.0.0
+# anthropic>=0.20.0
